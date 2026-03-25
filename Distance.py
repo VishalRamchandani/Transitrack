@@ -101,69 +101,113 @@ tab1, tab2, tab3, tab4 = st.tabs([
 # ================================================================
 # ✅ TAB 1 — DRIVING DISTANCE + INTERACTIVE MAP
 # ================================================================
+import polyline  # NEW dependency; add to requirements.txt
+
 with tab1:
     st.subheader("Driving Distance (All India Pincodes)")
 
+    # ---------------------------
+    # USER INPUT
+    # ---------------------------
     p1 = st.text_input("Origin Pincode", placeholder="Enter origin pincode...")
     p2 = st.text_input("Destination Pincode", placeholder="Enter destination pincode...")
 
+    # ---------------------------
+    # BUTTON
+    # ---------------------------
     if st.button("Calculate Distance"):
-
-        # ✅ SIMPLE VALIDATION
         if not (p1.isdigit() and len(p1) == 6):
-            st.error("Invalid origin pincode format")
-            st.stop()
-        if not (p2.isdigit() and len(p2) == 6):
-            st.error("Invalid destination pincode format")
+            st.error("Invalid origin pincode.")
             st.stop()
 
-        # ✅ GEOCODE (reliable)
+        if not (p2.isdigit() and len(p2) == 6):
+            st.error("Invalid destination pincode.")
+            st.stop()
+
+        # ---------------------------
+        # GEOCODE
+        # ---------------------------
         c1 = geocode_pincode(p1)
         c2 = geocode_pincode(p2)
 
-        if not c1:
-            st.error(f"Unable to geocode origin pincode {p1}")
-            st.stop()
-        if not c2:
-            st.error(f"Unable to geocode destination pincode {p2}")
+        if not c1 or not c2:
+            st.error("Unable to geocode pincode(s).")
             st.stop()
 
-        # ✅ DISTANCE
-        dist = driving_distance(c1, c2)
-        if not dist:
-            st.error("Unable to get OSRM driving distance.")
-            st.stop()
-
-        st.success(f"Distance from {p1} → {p2}: **{dist} km**")
-
-        # ✅ RECORD HISTORY
-        hist = load_hist()
-        hist.append({"from": p1, "to": p2, "distance": dist})
-        save_hist(hist)
-
-        # ✅ FOLIUM MAP
-        st.markdown("### 🗺️ Interactive Map")
-
+        # ---------------------------
+        # OSRM API call WITH GEOMETRY
+        # ---------------------------
         lat1, lon1 = c1
         lat2, lon2 = c2
 
+        osrm_url = (
+            f"http://router.project-osrm.org/route/v1/driving/"
+            f"{lon1},{lat1};{lon2},{lat2}?overview=full&geometries=polyline"
+        )
+
+        r = requests.get(osrm_url).json()
+
+        if "routes" not in r:
+            st.error("Unable to calculate route.")
+            st.stop()
+
+        distance_km = round(r["routes"][0]["distance"] / 1000, 2)
+        encoded_poly = r["routes"][0]["geometry"]
+
+        # ✅ decode OSRM polyline to coordinates
+        route_coords = polyline.decode(encoded_poly)
+
+        # ---------------------------
+        # SAVE TO SESSION STATE (fix disappearing map)
+        # ---------------------------
+        st.session_state["p1"] = p1
+        st.session_state["p2"] = p2
+        st.session_state["distance"] = distance_km
+        st.session_state["c1"] = c1
+        st.session_state["c2"] = c2
+        st.session_state["route"] = route_coords
+
+    # ---------------------------
+    # DISPLAY AFTER BUTTON PRESS
+    # ---------------------------
+    if "distance" in st.session_state:
+        st.success(
+            f"Distance from {st.session_state['p1']} → "
+            f"{st.session_state['p2']}: **{st.session_state['distance']} km**"
+        )
+
+        # ---------------------------
+        # BUILD INTERACTIVE MAP
+        # ---------------------------
+        lat1, lon1 = st.session_state["c1"]
+        lat2, lon2 = st.session_state["c2"]
+        route_coords = st.session_state["route"]
+
+        # Center between points
         center_lat = (lat1 + lat2) / 2
         center_lon = (lon1 + lon2) / 2
 
-        m = folium.Map(location=[center_lat, center_lon], zoom_start=6)
+        m = folium.Map(location=[center_lat, center_lon], zoom_start=7)
 
+        # Markers
         folium.Marker([lat1, lon1],
-                      popup=f"Origin ({p1})",
-                      icon=folium.Icon(color="green", icon="play")).add_to(m)
+                      popup=f"Origin ({st.session_state['p1']})",
+                      icon=folium.Icon(color="green")).add_to(m)
 
         folium.Marker([lat2, lon2],
-                      popup=f"Destination ({p2})",
-                      icon=folium.Icon(color="red", icon="flag")).add_to(m)
+                      popup=f"Destination ({st.session_state['p2']})",
+                      icon=folium.Icon(color="red")).add_to(m)
 
-        folium.PolyLine([[lat1, lon1], [lat2, lon2]],
-                        color="orange", weight=4).add_to(m)
+        # ✅ ACTUAL ROAD ROUTE
+        folium.PolyLine(
+            locations=route_coords,
+            color="orange",
+            weight=4,
+            opacity=0.9
+        ).add_to(m)
 
-        st_folium(m, width=700, height=500)
+        st.markdown("### 🗺️ Interactive Driving Route Map")
+        st_folium(m, width=750, height=550)
 
 
 # ================================================================
