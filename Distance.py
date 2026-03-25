@@ -281,7 +281,7 @@ with tab5:
     
     ✅ A1 = "From"  
     ✅ B1 = "To"  
-    ✅ Output will be generated in Column C  
+    ✅ Program ignores spaces & casing  
     """)
 
     file = st.file_uploader("Upload Excel File (.xlsx)", type=["xlsx"])
@@ -289,16 +289,27 @@ with tab5:
     if file:
         df = pd.read_excel(file)
 
-        if "From" not in df.columns or "To" not in df.columns:
-            st.error("Excel must contain 'From' and 'To' columns.")
+        # ✅ NORMALIZE COLUMN NAMES (fix your issue)
+        # Removes spaces, tabs, Unicode NBSP, converts to lowercase
+        df.columns = (
+            df.columns
+            .str.replace(r"\s+", "", regex=True)    # remove ALL spaces
+            .str.replace(u"\u00A0", "", regex=False) # remove NBSPs
+            .str.lower()
+        )
+
+        # ✅ Standardize expected column names
+        if "from" not in df.columns or "to" not in df.columns:
+            st.error("Excel must contain headers 'From' and 'To' (any case, spaces allowed).")
             st.stop()
 
         out_distances = []
 
         for _, row in df.iterrows():
-            a = str(row["From"])
-            b = str(row["To"])
+            a = str(row["from"]).strip()
+            b = str(row["to"]).strip()
 
+            # ✅ Handle empty & invalid entries
             if not (a.isdigit() and len(a) == 6 and b.isdigit() and len(b) == 6):
                 out_distances.append("Invalid PIN")
                 continue
