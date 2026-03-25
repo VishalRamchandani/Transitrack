@@ -93,7 +93,7 @@ st.markdown("""
 tab1, tab2, tab3, tab4 = st.tabs([
     "📍 Driving Distance",
     "📅 Transit Days",
-    "🎮 Tetris",
+    "🎮 pacman",
     "📜 History"
 ])
 
