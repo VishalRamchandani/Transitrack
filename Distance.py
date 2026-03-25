@@ -1,55 +1,49 @@
 import streamlit as st
 import json
 import os
-import pandas as pd
 import requests
-import io
+from geopy.geocoders import Nominatim
+import folium
+from streamlit_folium import st_folium
 
-# ===============================================================
-# ✅ LOAD FULL INDIA PINCODE DATASET (~19,300 pincodes)
-# Source reference:
-# Minimal India Pincode list with latitude & longitude:
-# https://github.com/mrparveensharma/All-India-Pincode-list-with-latitude-and-longitude
-#   [1](https://github.com/mrparveensharma/All-India-Pincode-list-with-latitude-and-longitude/blob/master/Minimal-India-Pincode-list-with-latitude-and-longitude.csv)
-# Dataset documentation describing ~19,300 PIN codes:
-#   [2](https://rdrr.io/github/harshvardhaniimi/IndiaPIN/man/IndiaPIN.html)[3](https://www.harsh17.in/indiapin/)
-# ===============================================================
+# ================================================================
+# ✅ INDIA POST API — Validates ALL Indian pincodes
+# ================================================================
+def fetch_postoffice_info(pincode):
+    url = f"https://api.postalpincode.in/pincode/{pincode}"
+    try:
+        r = requests.get(url, timeout=5).json()
+        if r[0]["Status"] == "Success":
+            return r[0]["PostOffice"][0]
+        return None
+    except:
+        return None
+
+
+# ================================================================
+# ✅ NOMINATIM GEOCODING (CACHED)
+# ================================================================
+geolocator = Nominatim(user_agent="transitrack_geocoder")
 
 @st.cache_data
-def load_pincode_data():
-    url = "https://raw.githubusercontent.com/mrparveensharma/All-India-Pincode-list-with-latitude-and-longitude/master/Minimal-India-Pincode-list-with-latitude-and-longitude.csv"
-    df = pd.read_csv(url)
-    df = df.rename(columns={
-        "Pincode": "pincode",
-        "Latitude": "latitude",
-        "Longitude": "longitude"
-    })
-    df["pincode"] = df["pincode"].astype(int)
-    return df
-
-df = load_pincode_data()
-
-
-# ===============================================================
-# ✅ GET COORDINATES FOR PINCODE
-# ===============================================================
-def get_coords(pincode):
+def geocode_pincode(pincode, district, state):
     try:
-        pin = int(pincode)
-        row = df[df["pincode"] == pin]
-        if not row.empty:
-            return (row.iloc[0]["latitude"], row.iloc[0]["longitude"])
+        query = f"{district}, {state}, India"
+        loc = geolocator.geocode(query)
+        if loc:
+            return (loc.latitude, loc.longitude)
     except:
         pass
     return None
 
 
-# ===============================================================
-# ✅ DRIVING DISTANCE (OSRM — free, no key required)
-# ===============================================================
+# ================================================================
+# ✅ DRIVING DISTANCE (OSRM)
+# ================================================================
 def driving_distance(c1, c2):
     lat1, lon1 = c1
     lat2, lon2 = c2
+
     url = f"http://router.project-osrm.org/route/v1/driving/{lon1},{lat1};{lon2},{lat2}?overview=false"
     try:
         r = requests.get(url).json()
@@ -60,16 +54,16 @@ def driving_distance(c1, c2):
     return None
 
 
-# ===============================================================
-# ✅ TRANSIT DAYS (E-WAY BILL STYLE)
-# ===============================================================
-def eway_transit_days(dist):
-    return round(dist / 200, 1)
+# ================================================================
+# ✅ TRANSIT DAYS (E-Way Bill Logic)
+# ================================================================
+def eway_transit_days(distance_km):
+    return round(distance_km / 200, 1)
 
 
-# ===============================================================
-# ✅ HISTORY FUNCTIONS
-# ===============================================================
+# ================================================================
+# ✅ HISTORY STORE
+# ================================================================
 HFILE = "history.json"
 
 def load_hist():
@@ -79,9 +73,9 @@ def save_hist(h):
     json.dump(h, open(HFILE, "w"), indent=4)
 
 
-# ===============================================================
-# ✅ UI STYLE / HERO SECTION
-# ===============================================================
+# ================================================================
+# ✅ PAGE STYLE (Dark UI + Hero Section)
+# ================================================================
 st.markdown("""
 <style>
 .stApp {
@@ -89,11 +83,8 @@ st.markdown("""
     color:white;
     font-family:'Segoe UI';
 }
-.hero {
-    text-align:center;
-    padding:50px 40px;
-}
-.hero-title { font-size:60px; font-weight:900; }
+.hero { text-align:center; padding:50px 40px; }
+.hero-title { font-size:60px; font-weight:900; color:white; }
 .hero-subtitle { color:#ff6a3d; font-size:24px; font-weight:600; }
 .hero-desc { font-size:20px; color:#bbb; max-width:700px; margin:auto; }
 input { border:2px solid #ff6a3d !important; border-radius:6px !important; }
@@ -102,6 +93,7 @@ input { border:2px solid #ff6a3d !important; border-radius:6px !important; }
 """, unsafe_allow_html=True)
 
 
+# ✅ HERO
 st.markdown("""
 <div class="hero">
     <div class="hero-title">TransiTrack</div>
@@ -113,9 +105,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# ===============================================================
+# ================================================================
 # ✅ TABS
-# ===============================================================
+# ================================================================
 tab1, tab2, tab3, tab4 = st.tabs([
     "📍 Driving Distance",
     "📅 Transit Days",
@@ -124,73 +116,137 @@ tab1, tab2, tab3, tab4 = st.tabs([
 ])
 
 
-# ===============================================================
+# ================================================================
 # ✅ TAB 1 — DRIVING DISTANCE
-# ===============================================================
+# ================================================================
 with tab1:
-    st.subheader("Driving Distance")
+    st.subheader("Driving Distance (All India Pincodes)")
 
-    p1 = st.text_input("Origin Pincode", placeholder="Enter origin pincode...", key="d1")
-    p2 = st.text_input("Destination Pincode", placeholder="Enter destination pincode...", key="d2")
+    p1 = st.text_input("Origin Pincode", placeholder="Enter origin pincode...", key="orig")
+    p2 = st.text_input("Destination Pincode", placeholder="Enter destination pincode...", key="dest")
 
-    if st.button("Calculate Distance", key="dd_btn"):
+    if st.button("Calculate Distance"):
+
         if p1.isdigit() and p2.isdigit():
-            c1 = get_coords(p1)
-            c2 = get_coords(p2)
 
-            if c1 and c2:
-                dist = driving_distance(c1, c2)
-                if dist:
-                    st.success(f"{p1} → {p2} = {dist} km")
+            # ✅ Step 1: India Post validation
+            info1 = fetch_postoffice_info(p1)
+            info2 = fetch_postoffice_info(p2)
 
-                    hist = load_hist()
-                    hist.append({"from": p1, "to": p2, "distance": dist})
-                    save_hist(hist)
-                else:
-                    st.error("Unable to calculate driving route.")
+            if not info1:
+                st.error(f"Invalid origin pincode: {p1}")
+                st.stop()
+            if not info2:
+                st.error(f"Invalid destination pincode: {p2}")
+                st.stop()
+
+            # ✅ Step 2: Geocode only once (cached)
+            c1 = geocode_pincode(p1, info1["District"], info1["State"])
+            c2 = geocode_pincode(p2, info2["District"], info2["State"])
+
+            if not c1 or not c2:
+                st.error("Unable to geocode one or both pincodes.")
+                st.stop()
+
+            # ✅ Step 3: Driving distance
+            dist = driving_distance(c1, c2)
+            if dist:
+                st.success(f"Distance from {p1} → {p2}: **{dist} km**")
+
+                hist = load_hist()
+                hist.append({"from": p1, "to": p2, "distance": dist})
+                save_hist(hist)
+
+                # ✅ INTERACTIVE FOLIUM MAP
+                st.markdown("### 🗺️ Interactive Map with Markers")
+
+                lat1, lon1 = c1
+                lat2, lon2 = c2
+
+                center_lat = (lat1 + lat2) / 2
+                center_lon = (lon1 + lon2) / 2
+
+                m = folium.Map(location=[center_lat, center_lon], zoom_start=6)
+
+                folium.Marker(
+                    [lat1, lon1],
+                    popup=f"Origin: {p1}",
+                    icon=folium.Icon(color="green", icon="play")
+                ).add_to(m)
+
+                folium.Marker(
+                    [lat2, lon2],
+                    popup=f"Destination: {p2}",
+                    icon=folium.Icon(color="red", icon="flag")
+                ).add_to(m)
+
+                folium.PolyLine(
+                    locations=[[lat1, lon1], [lat2, lon2]],
+                    color="orange",
+                    weight=4,
+                    opacity=0.8
+                ).add_to(m)
+
+                st_folium(m, width=700, height=500)
+
             else:
-                st.error("Invalid pincode.")
+                st.error("Unable to calculate route via OSRM.")
+
         else:
-            st.error("Enter numeric pincodes only.")
+            st.error("Enter numeric 6-digit Indian pincodes.")
 
 
-# ===============================================================
+# ================================================================
 # ✅ TAB 2 — TRANSIT DAYS
-# ===============================================================
+# ================================================================
 with tab2:
-    st.subheader("Transit Days (E-Way Bill Estimate)")
+    st.subheader("Transit Days (E‑Way Bill Estimate)")
 
-    o = st.text_input("Origin Pincode", placeholder="Enter origin...", key="t1")
-    p = st.text_input("Destination Pincode", placeholder="Enter destination...", key="t2")
+    o = st.text_input("Origin Pincode", placeholder="Enter origin...", key="t_o")
+    d = st.text_input("Destination Pincode", placeholder="Enter destination...", key="t_d")
 
-    if st.button("Calculate Transit Days", key="t3"):
-        if o.isdigit() and p.isdigit():
-            c1 = get_coords(o)
-            c2 = get_coords(p)
-            if c1 and c2:
-                dist = driving_distance(c1, c2)
-                if dist:
-                    days = eway_transit_days(dist)
-                    st.success(f"Transit Days: {days} days\nDistance: {dist} km")
-                else:
-                    st.error("Unable to compute distance.")
+    if st.button("Calculate Transit"):
+
+        if o.isdigit() and d.isdigit():
+
+            info1 = fetch_postoffice_info(o)
+            info2 = fetch_postoffice_info(d)
+
+            if not info1:
+                st.error(f"Invalid origin pincode: {o}")
+                st.stop()
+            if not info2:
+                st.error(f"Invalid destination pincode: {d}")
+                st.stop()
+
+            c1 = geocode_pincode(o, info1["District"], info1["State"])
+            c2 = geocode_pincode(d, info2["District"], info2["State"])
+
+            if not c1 or not c2:
+                st.error("Unable to geocode one or both pincodes.")
+                st.stop()
+
+            dist = driving_distance(c1, c2)
+            if dist:
+                days = eway_transit_days(dist)
+                st.success(f"Transit Days: **{days} days**\nDistance: **{dist} km**")
             else:
-                st.error("Invalid pincodes.")
+                st.error("Route not found.")
         else:
             st.error("Use numeric pincodes only.")
 
 
-# ===============================================================
-# ✅ TAB 3 — GAME
-# ===============================================================
+# ================================================================
+# ✅ TAB 3 — TETRIS GAME
+# ================================================================
 with tab3:
     st.subheader("🎮 Play Pacman")
     st.components.v1.iframe("https://bobzgames.github.io/GBA/launcher.html#pmc", height=650)
 
 
-# ===============================================================
+# ================================================================
 # ✅ TAB 4 — HISTORY
-# ===============================================================
+# ================================================================
 with tab4:
     st.subheader("Distance History")
 
@@ -202,14 +258,14 @@ with tab4:
     else:
         st.info("No history yet.")
 
-    if st.button("Clear History", key="clr"):
+    if st.button("Clear History"):
         save_hist([])
         st.success("History cleared!")
 
 
-# ===============================================================
+# ================================================================
 # ✅ FOOTER
-# ===============================================================
+# ================================================================
 st.markdown("""
 <div class="footer">
 Created by <strong>Vishal Ramchandani</strong>
