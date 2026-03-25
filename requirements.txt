@@ -6,4 +6,3 @@ streamlit-folium
 Polyline
 openpyxl
 pandas
-Antpath
