@@ -13,12 +13,23 @@ def fetch_postoffice_info(pincode):
     url = f"https://api.postalpincode.in/pincode/{pincode}"
     try:
         r = requests.get(url, timeout=5).json()
+        
+        # If API says "Success", pincode IS valid even if PostOffice is None
         if r[0]["Status"] == "Success":
-            return r[0]["PostOffice"][0]
-        return None
+            # When PostOffice list exists → return first entry
+            if r[0].get("PostOffice"):
+                return r[0]["PostOffice"][0]
+            else:
+                # Valid pincode but no detailed info available
+                return {
+                    "District": "",
+                    "State": "",
+                    "Name": ""
+                }
+        else:
+            return None
     except:
         return None
-
 
 # ================================================================
 # ✅ NOMINATIM GEOCODING (CACHED)
