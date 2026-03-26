@@ -111,22 +111,36 @@ with tab1:
     col1, col2 = st.columns(2)
 
     with col1:
-        from_type = st.selectbox("From Type",["Pincode","City"])
-        origin = st.text_input("From (Pincode)") if from_type=="Pincode" else st.selectbox("From City",CITIES)
+        origin = st.text_input(
+            "From (City or Pincode)",
+            placeholder="e.g. Mumbai or 400069"
+        )
+        st.caption("Suggestions: Mumbai, Delhi, Pune, Bangalore, Chennai, Hyderabad")
 
     with col2:
-        to_type = st.selectbox("To Type",["Pincode","City"])
-        destination = st.text_input("To (Pincode)") if to_type=="Pincode" else st.selectbox("To City",CITIES)
+        destination = st.text_input(
+            "To (City or Pincode)",
+            placeholder="e.g. Jaipur or 302039"
+        )
+        st.caption("Suggestions: Jaipur, Ahmedabad, Surat, Indore, Kochi")
 
     if st.button("Calculate Route"):
         c1 = geocode_location(origin)
         c2 = geocode_location(destination)
 
-        if not c1 or not c2:
-            st.error("Unable to locate origin or destination.")
+        if not origin or not destination:
+            st.error("Please enter both origin and destination.")
             st.stop()
 
-        dist, route = osrm_route(c1,c2)
+        if not c1:
+            st.error(f"Unable to locate: {origin}")
+            st.stop()
+
+        if not c2:
+            st.error(f"Unable to locate: {destination}")
+            st.stop()
+
+        dist, route = osrm_route(c1, c2)
         if not route:
             st.error("Routing failed.")
             st.stop()
@@ -135,29 +149,7 @@ with tab1:
         st.session_state["distance"] = dist
         st.session_state["origin"] = origin
         st.session_state["destination"] = destination
-        st.session_state["coords"] = (c1,c2)
-
-        hist = load_history()
-        hist.append({"from":origin,"to":destination,"distance":dist})
-        save_history(hist)
-
-    if "route" in st.session_state:
-        st.success(f"Distance: **{st.session_state['distance']} km**")
-
-        route = st.session_state["route"]
-        (lat1,lon1),(lat2,lon2) = st.session_state["coords"]
-
-        m = folium.Map(location=route[len(route)//2], zoom_start=6)
-
-        folium.Marker(route[0],popup=f"From: {st.session_state['origin']}",
-                      icon=folium.Icon(color="green")).add_to(m)
-        folium.Marker(route[-1],popup=f"To: {st.session_state['destination']}",
-                      icon=folium.Icon(color="red")).add_to(m)
-
-        folium.PolyLine(route,color="orange",weight=4).add_to(m)
-        AntPath(route,color="#00FFFF",pulse_color="#00FF88").add_to(m)
-
-        st_folium(m,width=800,height=550)
+        st.session_state["coords"] = (c1, c2)
 
 # ================================================================
 # ✅ TAB 2 — TRANSIT DAYS
