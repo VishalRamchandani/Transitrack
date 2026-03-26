@@ -113,43 +113,96 @@ with tab1:
     with col1:
         origin = st.text_input(
             "From (City or Pincode)",
-            placeholder="e.g. Mumbai or 400069"
+            placeholder="e.g. Mumbai or 400069",
+            key="origin_input"
         )
-        st.caption("Suggestions: Mumbai, Delhi, Pune, Bangalore, Chennai, Hyderabad")
 
     with col2:
         destination = st.text_input(
             "To (City or Pincode)",
-            placeholder="e.g. Jaipur or 302039"
+            placeholder="e.g. Jaipur or 302039",
+            key="destination_input"
         )
-        st.caption("Suggestions: Jaipur, Ahmedabad, Surat, Indore, Kochi")
 
-    if st.button("Calculate Route"):
-        c1 = geocode_location(origin)
-        c2 = geocode_location(destination)
+    # --------------------------------------------------
+    # 1️⃣ CALCULATION (ONLY ON BUTTON CLICK)
+    # --------------------------------------------------
+    if st.button("Calculate Route", key="calc_route_btn"):
 
         if not origin or not destination:
             st.error("Please enter both origin and destination.")
             st.stop()
 
+        c1 = geocode_location(origin)
+        c2 = geocode_location(destination)
+
         if not c1:
             st.error(f"Unable to locate: {origin}")
             st.stop()
-
         if not c2:
             st.error(f"Unable to locate: {destination}")
             st.stop()
 
         dist, route = osrm_route(c1, c2)
+
         if not route:
-            st.error("Routing failed.")
+            st.error("Unable to calculate road route.")
             st.stop()
 
-        st.session_state["route"] = route
-        st.session_state["distance"] = dist
-        st.session_state["origin"] = origin
-        st.session_state["destination"] = destination
-        st.session_state["coords"] = (c1, c2)
+        # ✅ STORE RESULT (CRITICAL)
+        st.session_state["route_result"] = {
+            "origin": origin,
+            "destination": destination,
+            "distance": dist,
+            "route": route,
+            "c1": c1,
+            "c2": c2,
+        }
+
+    # --------------------------------------------------
+    # 2️⃣ DISPLAY (PERSISTS ACROSS RERUNS)
+    # --------------------------------------------------
+    if "route_result" in st.session_state:
+        result = st.session_state["route_result"]
+
+        st.success(
+            f"Distance: **{result['origin']} → {result['destination']} = {result['distance']} km**"
+        )
+
+        route = result["route"]
+        (lat1, lon1), (lat2, lon2) = result["c1"], result["c2"]
+
+        m = folium.Map(
+            location=route[len(route)//2],
+            zoom_start=6
+        )
+
+        folium.Marker(
+            route[0],
+            popup=f"From: {result['origin']}",
+            icon=folium.Icon(color="green")
+        ).add_to(m)
+
+        folium.Marker(
+            route[-1],
+            popup=f"To: {result['destination']}",
+            icon=folium.Icon(color="red")
+        ).add_to(m)
+
+        folium.PolyLine(
+            route,
+            color="orange",
+            weight=4
+        ).add_to(m)
+
+        AntPath(
+            route,
+            color="#00FFFF",
+            pulse_color="#00FF88"
+        ).add_to(m)
+
+        st.markdown("### 🗺️ Interactive Route Map")
+        st_folium(m, width=800, height=550)
 
 # ================================================================
 # ✅ TAB 2 — TRANSIT DAYS
