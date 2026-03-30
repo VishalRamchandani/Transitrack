@@ -227,52 +227,85 @@ with tab2:
 # ✅ TAB 3 — EXCEL UPLOAD (ROBUST NORMALIZATION)
 # ================================================================
 with tab3:
-    st.subheader("Bulk Distance via Excel")
+    st.subheader("📁 Bulk Distance via Excel")
 
     st.markdown("""
-    **Format:**
-    - Column A: From
-    - Column B: To  
-    (spaces & case ignored)
+    **Expected Excel format:**
+
+    | From | To |
+    |------|----|
+    | 400069 | Jaipur |
+    | Mumbai | 302039 |
+
+    ✅ Column names are case‑insensitive  
+    ✅ Spaces around names are ignored  
     """)
 
-    file = st.file_uploader("Upload Excel (.xlsx)",type=["xlsx"])
-    if file:
-        df = pd.read_excel(file)
+    uploaded_file = st.file_uploader(
+        "Upload Excel file (.xlsx)",
+        type=["xlsx"],
+        key="excel_uploader"
+    )
 
+    # ----------------------------------------------------
+    # 1️⃣ PROCESS FILE (ON UPLOAD)
+    # ----------------------------------------------------
+    if uploaded_file is not None:
+
+        df = pd.read_excel(uploaded_file)
+
+        # ✅ Normalize column headers
         df.columns = (
             df.columns
-            .str.replace(r"\s+","",regex=True)
-            .str.replace(u"\u00A0","",regex=False)
+            .astype(str)
+            .str.replace(r"\s+", "", regex=True)
+            .str.replace("\u00A0", "", regex=False)
             .str.lower()
         )
 
         if "from" not in df.columns or "to" not in df.columns:
-            st.error("Headers must include From and To.")
+            st.error("Excel must contain 'From' and 'To' columns.")
             st.stop()
 
-        out = []
-        for _,r in df.iterrows():
-            c1 = geocode_location(str(r["from"]))
-            c2 = geocode_location(str(r["to"]))
-            if not c1 or not c2:
-                out.append("Error")
-                continue
-            d,_ = osrm_route(c1,c2)
-            out.append(d)
+        distances = []
 
-        df["Distance_KM"] = out
+        with st.spinner("Calculating distances…"):
+            for _, row in df.iterrows():
+                src = str(row["from"]).strip()
+                dst = str(row["to"]).strip()
 
-        buff = BytesIO()
-        df.to_excel(buff,index=False,engine="openpyxl")
-        buff.seek(0)
+                c1 = geocode_location(src)
+                c2 = geocode_location(dst)
 
+                if not c1 or not c2:
+                    distances.append("Location Error")
+                    continue
+
+                dist, _ = osrm_route(c1, c2)
+                distances.append(dist if dist else "Route Error")
+
+        df["Distance_KM"] = distances
+
+        # ✅ Create Excel in‑memory and STORE in session_state
+        output_buffer = BytesIO()
+        df.to_excel(output_buffer, index=False, engine="openpyxl")
+        output_buffer.seek(0)
+
+        st.session_state["excel_output"] = output_buffer
+
+        st.success("✅ Distances calculated successfully.")
+
+    # ----------------------------------------------------
+    # 2️⃣ DOWNLOAD BUTTON (PERSISTENT)
+    # ----------------------------------------------------
+    if "excel_output" in st.session_state:
         st.download_button(
-            "⬇️ Download Excel",
-            buff,
-            "TransiTrack_Output.xlsx"
+            label="⬇️ Download Output Excel",
+            data=st.session_state["excel_output"],
+            file_name="TransiTrack_Distances.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-
+``
 # ================================================================
 # ✅ TAB 4 — HISTORY
 # ================================================================
