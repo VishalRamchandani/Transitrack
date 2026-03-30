@@ -318,7 +318,7 @@ with tab3:
         # -----------------------------------------
         if end < total:
             st.info("Continuing automatically…")
-            st.experimental_rerun()
+            st.rerun()
         else:
             # ✅ FINISHED – CREATE OUTPUT
             output = BytesIO()
