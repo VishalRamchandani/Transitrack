@@ -230,15 +230,10 @@ with tab3:
     st.subheader("📁 Bulk Distance via Excel")
 
     st.markdown("""
-    **Expected Excel format:**
-
-    | From | To |
-    |------|----|
-    | 400069 | Jaipur |
-    | Mumbai | 302039 |
-
-    ✅ Column names are case‑insensitive  
-    ✅ Spaces around names are ignored  
+    ⚠️ **Important limits:**
+    - Max 20 rows per upload (to avoid API blocking)
+    - Processing happens sequentially
+    - Large files should be split
     """)
 
     uploaded_file = st.file_uploader(
@@ -247,57 +242,73 @@ with tab3:
         key="excel_uploader"
     )
 
-    # ----------------------------------------------------
-    # 1️⃣ PROCESS FILE (ON UPLOAD)
-    # ----------------------------------------------------
     if uploaded_file is not None:
 
         df = pd.read_excel(uploaded_file)
 
-        # ✅ Normalize column headers
+        # ✅ Normalize headers
         df.columns = (
             df.columns
-            .astype(str)
-            .str.replace(r"\s+", "", regex=True)
-            .str.replace("\u00A0", "", regex=False)
-            .str.lower()
+              .astype(str)
+              .str.replace(r"\s+", "", regex=True)
+              .str.replace("\u00A0", "", regex=False)
+              .str.lower()
         )
 
         if "from" not in df.columns or "to" not in df.columns:
             st.error("Excel must contain 'From' and 'To' columns.")
             st.stop()
 
+        # ✅ HARD SAFETY LIMIT
+        if len(df) > 20:
+            st.error("Please upload a maximum of 20 rows at a time.")
+            st.stop()
+
+        progress = st.progress(0)
+        status = st.empty()
+
         distances = []
+        geocode_cache = {}
 
-        with st.spinner("Calculating distances…"):
-            for _, row in df.iterrows():
-                src = str(row["from"]).strip()
-                dst = str(row["to"]).strip()
+        for idx, row in df.iterrows():
+            status.write(f"🔄 Processing row {idx + 1} of {len(df)}")
 
-                c1 = geocode_location(src)
-                c2 = geocode_location(dst)
+            src = str(row["from"]).strip()
+            dst = str(row["to"]).strip()
 
-                if not c1 or not c2:
-                    distances.append("Location Error")
-                    continue
+            # ✅ Cache geocoding results
+            if src not in geocode_cache:
+                geocode_cache[src] = geocode_location(src)
 
+            if dst not in geocode_cache:
+                geocode_cache[dst] = geocode_location(dst)
+
+            c1 = geocode_cache[src]
+            c2 = geocode_cache[dst]
+
+            if not c1 or not c2:
+                distances.append("Location Error")
+                progress.progress((idx + 1) / len(df))
+                continue
+
+            try:
                 dist, _ = osrm_route(c1, c2)
                 distances.append(dist if dist else "Route Error")
+            except:
+                distances.append("Timeout")
+
+            progress.progress((idx + 1) / len(df))
 
         df["Distance_KM"] = distances
 
-        # ✅ Create Excel in‑memory and STORE in session_state
-        output_buffer = BytesIO()
-        df.to_excel(output_buffer, index=False, engine="openpyxl")
-        output_buffer.seek(0)
+        output = BytesIO()
+        df.to_excel(output, index=False, engine="openpyxl")
+        output.seek(0)
 
-        st.session_state["excel_output"] = output_buffer
+        st.session_state["excel_output"] = output
 
-        st.success("✅ Distances calculated successfully.")
+        st.success("✅ Distance calculation completed.")
 
-    # ----------------------------------------------------
-    # 2️⃣ DOWNLOAD BUTTON (PERSISTENT)
-    # ----------------------------------------------------
     if "excel_output" in st.session_state:
         st.download_button(
             label="⬇️ Download Output Excel",
