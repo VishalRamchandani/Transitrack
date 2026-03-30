@@ -227,13 +227,13 @@ with tab2:
 # ✅ TAB 3 — EXCEL UPLOAD (ROBUST NORMALIZATION)
 # ================================================================
 with tab3:
-    st.subheader("📁 Bulk Distance via Excel")
+    st.subheader("📁 Bulk Distance via Excel (Auto‑Batched)")
 
     st.markdown("""
-    ⚠️ **Important limits:**
-    - Max 20 rows per upload (to avoid API blocking)
-    - Processing happens sequentially
-    - Large files should be split
+    ✅ Any file size supported  
+    ✅ Processed automatically in batches of 20  
+    ✅ Safe for public APIs  
+    ✅ No manual splitting needed
     """)
 
     uploaded_file = st.file_uploader(
@@ -242,73 +242,95 @@ with tab3:
         key="excel_uploader"
     )
 
-    if uploaded_file is not None:
-
+    # -----------------------------------------
+    # INITIALISE SESSION STATE ON FIRST UPLOAD
+    # -----------------------------------------
+    if uploaded_file is not None and "excel_df" not in st.session_state:
         df = pd.read_excel(uploaded_file)
 
-        # ✅ Normalize headers
+        # Normalise headers
         df.columns = (
             df.columns
-              .astype(str)
-              .str.replace(r"\s+", "", regex=True)
-              .str.replace("\u00A0", "", regex=False)
-              .str.lower()
+            .astype(str)
+            .str.replace(r"\s+", "", regex=True)
+            .str.replace("\u00A0", "", regex=False)
+            .str.lower()
         )
 
         if "from" not in df.columns or "to" not in df.columns:
             st.error("Excel must contain 'From' and 'To' columns.")
             st.stop()
 
-        # ✅ HARD SAFETY LIMIT
-        if len(df) > 20:
-            st.error("Please upload a maximum of 20 rows at a time.")
-            st.stop()
+        df["distance_km"] = None
 
-        progress = st.progress(0)
+        st.session_state.update({
+            "excel_df": df,
+            "excel_index": 0,
+            "excel_results": [],
+            "geocode_cache": {}
+        })
+
+    # -----------------------------------------
+    # PROCESS NEXT BATCH AUTOMATICALLY
+    # -----------------------------------------
+    if "excel_df" in st.session_state:
+        df = st.session_state["excel_df"]
+        start = st.session_state["excel_index"]
+        total = len(df)
+
+        BATCH_SIZE = 20
+        end = min(start + BATCH_SIZE, total)
+
+        progress = st.progress(start / total)
         status = st.empty()
 
-        distances = []
-        geocode_cache = {}
+        with st.spinner(f"Processing rows {start+1}–{end} of {total}"):
+            for i in range(start, end):
+                row = df.iloc[i]
+                src = str(row["from"]).strip()
+                dst = str(row["to"]).strip()
 
-        for idx, row in df.iterrows():
-            status.write(f"🔄 Processing row {idx + 1} of {len(df)}")
+                cache = st.session_state["geocode_cache"]
 
-            src = str(row["from"]).strip()
-            dst = str(row["to"]).strip()
+                if src not in cache:
+                    cache[src] = geocode_location(src)
+                if dst not in cache:
+                    cache[dst] = geocode_location(dst)
 
-            # ✅ Cache geocoding results
-            if src not in geocode_cache:
-                geocode_cache[src] = geocode_location(src)
+                c1 = cache[src]
+                c2 = cache[dst]
 
-            if dst not in geocode_cache:
-                geocode_cache[dst] = geocode_location(dst)
+                if not c1 or not c2:
+                    df.at[i, "distance_km"] = "Location Error"
+                    continue
 
-            c1 = geocode_cache[src]
-            c2 = geocode_cache[dst]
+                try:
+                    dist, _ = osrm_route(c1, c2)
+                    df.at[i, "distance_km"] = dist if dist else "Route Error"
+                except:
+                    df.at[i, "distance_km"] = "Timeout"
 
-            if not c1 or not c2:
-                distances.append("Location Error")
-                progress.progress((idx + 1) / len(df))
-                continue
+            st.session_state["excel_index"] = end
+            progress.progress(end / total)
 
-            try:
-                dist, _ = osrm_route(c1, c2)
-                distances.append(dist if dist else "Route Error")
-            except:
-                distances.append("Timeout")
+        # -----------------------------------------
+        # CONTINUE OR FINISH
+        # -----------------------------------------
+        if end < total:
+            st.info("Continuing automatically…")
+            st.experimental_rerun()
+        else:
+            # ✅ FINISHED – CREATE OUTPUT
+            output = BytesIO()
+            df.to_excel(output, index=False, engine="openpyxl")
+            output.seek(0)
 
-            progress.progress((idx + 1) / len(df))
+            st.session_state["excel_output"] = output
+            st.success("✅ All rows processed successfully.")
 
-        df["Distance_KM"] = distances
-
-        output = BytesIO()
-        df.to_excel(output, index=False, engine="openpyxl")
-        output.seek(0)
-
-        st.session_state["excel_output"] = output
-
-        st.success("✅ Distance calculation completed.")
-
+    # -----------------------------------------
+    # DOWNLOAD BUTTON (PERSISTENT)
+    # -----------------------------------------
     if "excel_output" in st.session_state:
         st.download_button(
             label="⬇️ Download Output Excel",
